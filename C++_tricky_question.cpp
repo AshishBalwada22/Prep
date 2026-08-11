@@ -425,3 +425,90 @@ template <typename T>  void byValue    (T val)        // Way 1
 template <typename T>  void byRef      (T& val)       // Way 2
 template <typename T>  void byConstRef (const T& val) // Way 3
 
+Way 1 — T val (Pass By Value)
+template <typename T>
+void printType(T val) { ... }
+
+
+Rule: TWO things are always stripped away:
+const  → stripped ❌
+&      → stripped ❌
+
+
+template <typename T>
+void printType(T val) {
+    cout << "Value: " << val << "\n";
+    cout << "Type: " << typeid(T).name() << "\n\n";
+}
+
+    
+int x = 42;
+const int cx = 100;
+int& rx = x;
+
+printType(x);    // T = int          (plain int)
+printType(cx);   // T = int          (const stripped ✅)
+printType(rx);   // T = int          (& stripped ✅)
+
+
+
+Way 2 — T& (Pass By Reference)
+
+Rule: Reference is kept, const IS preserved
+const  → KEPT ✅
+&      → stripped (already a reference)
+
+template <typename T>
+void printRef(T& val) { ... }
+
+int x = 42;
+const int cx = 100;
+
+printRef(x);    // T = int         → val is int&
+printRef(cx);   // T = const int   → val is const int&
+
+Way 3 — const T& (Pass By Const Reference)
+
+Rule: const is already in the signature — T is always non-const
+const  → stripped from T (already in signature)
+&      → stripped from T (already in signature)
+
+template <typename T>
+void printConstRef(const T& val) { ... }
+
+int x = 42;
+const int cx = 100;
+
+printConstRef(x);    // T = int    → val is const int&
+printConstRef(cx);   // T = int    → val is const int&
+
+What Is Type Decay?
+Type decay = when a type loses its const, &, or array/function properties during template deduction.
+
+The 3 Rules — Memorize These
+┌─────────────────────────────────────────────────────────┐
+│ Rule 1: T val                                           │
+│   → const stripped, & stripped                          │
+│   → you get a fresh copy, qualifiers don't matter       │
+│                                                         │
+│ Rule 2: T& val                                          │
+│   → const KEPT, & stripped                              │
+│   → you see the original, const must be respected       │
+│                                                         │
+│ Rule 3: const T& val                                    │
+│   → const stripped from T, already in signature         │
+│   → T is always the base type                           │
+└─────────────────────────────────────────────────────────┘
+Quick Mental Trick
+Ask yourself:
+
+"Am I making a copy or looking at the original?"
+
+Copy (T val)        → strip everything, fresh start
+Original (T&)       → keep const, it belongs to original
+Const ref (const T&)→ T is always base type, const is in signature
+
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+
+6) Move Semantics + Rvalue References
