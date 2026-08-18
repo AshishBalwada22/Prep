@@ -512,3 +512,283 @@ Const ref (const T&)→ T is always base type, const is in signature
 -------------------------------------------------------------------------------------------------------------------------------------------------------
 
 6) Move Semantics + Rvalue References
+
+
+#include <iostream>
+#include <string>
+using namespace std;
+
+class Buffer {
+public:
+    int* data;
+    int size;
+
+    // Constructor
+    Buffer(int s) : size(s), data(new int[s]) {
+        cout << "Constructor: allocated " << size << "\n";
+    }
+
+    // Copy Constructor
+    Buffer(const Buffer& other) : size(other.size), data(new int[other.size]) {
+        copy(other.data, other.data + other.size, data);
+        cout << "Copy Constructor: copied " << size << "\n";
+    }
+
+    // Move Constructor
+    Buffer(Buffer&& other) : size(other.size), data(other.data) {
+        other.data = nullptr;
+        other.size = 0;
+        cout << "Move Constructor: moved " << size << "\n";
+    }
+
+    // Copy Assignment
+    Buffer& operator=(const Buffer& other) {
+        if (this != &other) {
+            delete[] data;
+            size = other.size;
+            data = new int[size];
+            copy(other.data, other.data + size, data);
+            cout << "Copy Assignment: copied " << size << "\n";
+        }
+        return *this;
+    }
+
+    // Move Assignment
+    Buffer& operator=(Buffer&& other) {
+        if (this != &other) {
+            delete[] data;
+            size = other.size;
+            data = other.data;
+            other.data = nullptr;
+            other.size = 0;
+            cout << "Move Assignment: moved " << size << "\n";
+        }
+        return *this;
+    }
+
+    ~Buffer() {
+        delete[] data;
+        cout << "Destructor: size " << size << "\n";
+    }
+};
+
+Buffer createBuffer() {
+    Buffer temp(5);
+    return temp;
+}
+
+int main() {
+    cout << "--- 1 ---\n";
+    Buffer b1(10);
+
+    cout << "--- 2 ---\n";
+    Buffer b2 = b1;
+
+    cout << "--- 3 ---\n";
+    Buffer b3 = move(b1);
+
+    cout << "--- 4 ---\n";
+    Buffer b4 = createBuffer();
+
+    cout << "--- 5 ---\n";
+    b2 = move(b3);
+
+    cout << "--- END ---\n";
+    return 0;
+}
+
+What is an lvalue and what is an rvalue? Give examples from this code
+What does && mean in Buffer(Buffer&& other)?
+What is the difference between copy and move? Why is move faster?
+What does move(b1) actually do?
+What happens to b1 after Buffer b3 = move(b1)? Is it safe to use?
+What is RVO/NRVO and how does it affect createBuffer()?
+What is the exact output of this program — section by section?
+After b2 = move(b3) — what is the state of b3?
+
+
+class Buffer {
+public:
+    int* data;   // pointer to heap memory
+    int size;
+};
+
+
+    
+Buffer b1(1000000);   // allocate 1 million ints
+Buffer b2 = b1;       // what happens here?
+
+b1:  data → [1, 2, 3, 4, ... 1000000 ints on heap]
+
+Copy means:
+→ allocate NEW memory for b2
+→ copy ALL 1 million values one by one
+→ b2: data → [1, 2, 3, 4, ... 1000000 ints on heap]
+
+Both b1 and b2 exist with their own memory
+This is EXPENSIVE 💸
+Question: What if you don't need b1 anymore after copying? You just wasted time copying 1 million values for no reason.
+
+
+lvalue vs rvalue — Foundation of Move Semantics
+
+Simple Rule:
+lvalue = has a name, has a permanent address, lives long
+rvalue = no name, temporary, dies immediately after expression
+
+int x = 42;
+//  ↑         ↑
+// lvalue    rvalue (42 is temporary, has no name)
+
+Buffer b1(10);
+//     ↑
+//   lvalue (b1 has a name, lives until end of scope)
+
+Buffer b2 = createBuffer();
+//          ↑
+//        rvalue (temporary object returned from function)
+
+b2 = move(b1);
+//   ↑
+// rvalue (move() casts b1 to rvalue)
+
+
+Can you take its address with & ?
+&b1   → works ✅ → b1 is lvalue
+&42   → fails ❌ → 42 is rvalue
+&createBuffer() → fails ❌ → temporary is rvalue
+
+
+lvalue Reference vs rvalue Reference
+int x = 42;
+
+int&  lref = x;    // lvalue reference  → binds to lvalue
+int&& rref = 42;   // rvalue reference  → binds to rvalue
+
+&   = lvalue reference  = "I refer to something permanent"
+&&  = rvalue reference  = "I refer to something temporary"
+
+The Key Insight:
+If something is temporary (rvalue)
+→ it is going to die anyway
+→ we can STEAL its resources instead of copying
+→ this is MOVE semantics
+
+
+
+Copy vs Move
+
+
+Copy Constructor:
+Buffer(const Buffer& other) {
+    // other is lvalue reference
+    // other still needs its data after this
+    // so we COPY everything
+
+    data = new int[other.size];           // allocate new memory
+    copy(other.data, other.data + size, data);  // copy all values
+}
+Before:  other.data → [1, 2, 3, 4, 5]
+After:   other.data → [1, 2, 3, 4, 5]   ← other unchanged
+         this.data  → [1, 2, 3, 4, 5]   ← new copy
+
+Move Constructor:
+Buffer(Buffer&& other) {
+    // other is rvalue reference
+    // other is TEMPORARY — it will die anyway
+    // so we STEAL its pointer instead of copying
+
+    data = other.data;      // steal the pointer
+    size = other.size;      // steal the size
+    other.data = nullptr;   // leave other empty
+    other.size = 0;         // leave other empty
+}
+
+Before:  other.data → [1, 2, 3, 4, 5]
+
+After:   other.data → nullptr            ← other is emptied
+         this.data  → [1, 2, 3, 4, 5]   ← same memory, no cop
+
+
+
+What Does std::move() Actually Do?
+Buffer b3 = move(b1);
+std::move() does NOT move anything.
+std::move() simply CASTS an lvalue to an rvalue reference
+
+    
+// move() is essentially this:
+template<typename T>
+T&& move(T& val) {
+    return static_cast<T&&>(val);  // just a cast
+}
+
+
+b1 is lvalue
+move(b1) → casts b1 to rvalue reference
+Now compiler sees rvalue → calls Move Constructor instead of Copy Constructor
+Move Constructor actually does the moving
+
+Timeline:
+Buffer b3 = move(b1);
+              ↓
+         move(b1) casts b1 to rvalue
+              ↓
+         Compiler sees rvalue argument
+              ↓
+         Calls Buffer(Buffer&& other)   ← Move Constructor
+              ↓
+         Steals b1's data pointer
+              ↓
+         b1.data = nullptr, b1.size = 0
+              ↓
+         b3 now owns the memory
+
+
+
+State After Move 
+Buffer b3 = move(b1);
+// Now what is b1?
+b1.data = nullptr
+b1.size = 0
+
+
+RVO / NRVO — Return Value Optimization / Named Return Value Optimization
+
+Buffer createBuffer() {
+    Buffer temp(5);
+    return temp;       // returning local variable
+}
+
+Buffer b4 = createBuffer();
+
+Without Optimization — What You'd Expect:
+1. temp constructed inside createBuffer()
+2. temp copied/moved to return value
+3. return value copied/moved to b4
+4. temp destroyed
+5. return value destroyed
+= 3 constructions, 2 destructions (expensive)
+With NRVO — What Actually Happens:
+Compiler is smart:
+→ It sees temp will be returned
+→ It constructs temp DIRECTLY in b4's memory location
+→ No copy, no move needed at all
+= 1 construction only ✅ (free optimization)
+NRVO = Named Return Value Optimization
+RVO  = Return Value Optimization (for unnamed temporaries)
+
+
+Golden Rules — Memorize These
+1. lvalue  = has name = use copy
+2. rvalue  = temporary = use move
+3. move()  = just a cast, not actual moving
+4. After move: object is valid but empty
+5. Move is O(1), Copy is O(N)
+6. RVO eliminates copies on return
+7. Always set moved-from pointer to nullptr
+
+
+---------------------------------------------------------------------------------------------
+
+
