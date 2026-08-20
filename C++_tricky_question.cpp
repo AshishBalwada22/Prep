@@ -791,4 +791,335 @@ Golden Rules — Memorize These
 
 ---------------------------------------------------------------------------------------------
 
+Smart Pointers + Ownership Model
 
+#include <iostream>
+#include <memory>
+using namespace std;
+
+class Resource {
+public:
+    string name;
+    Resource(string n) : name(n) {
+        cout << "Resource created: " << name << "\n";
+    }
+    ~Resource() {
+        cout << "Resource destroyed: " << name << "\n";
+    }
+    void use() {
+        cout << "Using: " << name << "\n";
+    }
+};
+
+void takeUnique(unique_ptr<Resource> ptr) {
+    ptr->use();
+}
+
+void peekUnique(const unique_ptr<Resource>& ptr) {
+    ptr->use();
+}
+
+shared_ptr<Resource> createShared() {
+    shared_ptr<Resource> s = make_shared<Resource>("SharedOne");
+    return s;
+}
+
+int main() {
+    cout << "--- 1: unique_ptr ---\n";
+    unique_ptr<Resource> u1 = make_unique<Resource>("Alpha");
+    unique_ptr<Resource> u2 = move(u1);
+
+    cout << "--- 2: use after move ---\n";
+    if (u1) {
+        u1->use();
+    } else {
+        cout << "u1 is empty\n";
+    }
+
+    cout << "--- 3: pass to function ---\n";
+    peekUnique(u2);
+    takeUnique(move(u2));
+
+    cout << "--- 4: shared_ptr ---\n";
+    shared_ptr<Resource> s1 = createShared();
+    cout << "Count: " << s1.use_count() << "\n";
+    shared_ptr<Resource> s2 = s1;
+    cout << "Count: " << s1.use_count() << "\n";
+    {
+        shared_ptr<Resource> s3 = s1;
+        cout << "Count: " << s1.use_count() << "\n";
+    }
+    cout << "Count: " << s1.use_count() << "\n";
+
+    cout << "--- 5: weak_ptr ---\n";
+    weak_ptr<Resource> w1 = s1;
+    cout << "Count: " << s1.use_count() << "\n";
+    {
+        shared_ptr<Resource> locked = w1.lock();
+        if (locked) {
+            locked->use();
+            cout << "Count: " << s1.use_count() << "\n";
+        }
+    }
+    cout << "Count: " << s1.use_count() << "\n";
+
+    cout << "--- END ---\n";
+    return 0;
+}
+
+
+Tell me:
+
+What is a smart pointer and why do we need it?
+What is unique_ptr — what are its ownership rules?
+Why does unique_ptr<Resource> u2 = u1 fail to compile but u2 = move(u1) works?
+What is shared_ptr — how does reference counting work?
+What is weak_ptr — why does it exist and what problem does it solve?
+What is the circular reference problem — give an example
+What is the exact output of this program section by section?
+After takeUnique(move(u2)) — when is "Alpha" resource destroyed?
+
+
+1) Why Do We Need Smart Pointers?
+
+The Old Way — Raw Pointers (Dangerous):
+
+void oldWay() {
+    Resource* ptr = new Resource("Alpha");  // allocate
+    
+    // ... lots of code ...
+    
+    if (something_failed) {
+        return;          // ❌ forgot to delete! MEMORY LEAK
+    }
+    
+    delete ptr;          // must remember to delete manually
+}
+
+Problems With Raw Pointers:
+❌ Forget to delete    → memory leak
+❌ Delete twice        → crash (double free)
+❌ Use after delete    → undefined behavior
+❌ Exception thrown    → delete never reached → leak
+
+
+Smart Pointers Fix All Of This:
+
+void newWay() {
+    unique_ptr<Resource> ptr = make_unique<Resource>("Alpha");
+    
+    // ... lots of code ...
+    
+    if (something_failed) {
+        return;    // ✅ ptr destroyed automatically here
+    }
+    
+}   // ✅ ptr destroyed automatically here too
+    // No manual delete needed EVER
+
+
+Smart pointers are objects that wrap a raw pointer and automatically delete it when they go out of scope. This is called RAII.
+
+RAII = Resource Acquisition Is Initialization
+     = when object dies → resource is cleaned up automatically
+
+
+
+2) The 3 Smart Pointers
+
+} unique_ptr   │ Only ONE owner at a time               │
+│ shared_ptr   │ MULTIPLE owners, reference counted     │
+│ weak_ptr     │ Observer, does NOT own the resource    │
+
+
+
+3) unique_ptr — Single Ownership
+
+Core Idea:
+unique_ptr = "I am the ONLY owner of this resource"
+→ When I die, the resource dies with me
+→ Nobody else can own it
+→ You can TRANSFER ownership but not SHARE it
+
+
+unique_ptr<Resource> u1 = make_unique<Resource>("Alpha");
+//                        ↑
+//                  always use make_unique
+//                  never use: unique_ptr<Resource>(new Resource("Alpha"))
+
+
+Why Can't You Copy It?
+unique_ptr<Resource> u2 = u1;    // ❌ COMPILE ERROR
+
+If copy was allowed:
+→ u1 owns the resource
+→ u2 also owns the resource
+→ u1 dies → deletes resource
+→ u2 dies → deletes resource AGAIN
+→ DOUBLE DELETE → CRASH 💥
+
+So copy is DISABLED by design
+
+
+You Can Only MOVE It:
+unique_ptr<Resource> u2 = move(u1);   // ✅ ownership transferred
+
+Before move:
+u1 → Resource("Alpha")
+u2 → nullptr
+
+After move:
+u1 → nullptr              ← u1 gives up ownership
+u2 → Resource("Alpha")    ← u2 is now the owner
+
+Checking If unique_ptr Is Empty:
+
+if (u1) {           // ✅ checks if u1 is not nullptr
+    u1->use();
+} else {
+    cout << "u1 is empty\n";
+}
+
+
+4) Passing unique_ptr To Functions
+
+// Way 1: Pass by move → function TAKES ownership
+void takeUnique(unique_ptr<Resource> ptr) {
+    ptr->use();
+}   // ptr dies here → Resource destroyed here
+
+// Way 2: Pass by const reference → function just PEEKS
+void peekUnique(const unique_ptr<Resource>& ptr) {
+    ptr->use();
+}   // ptr reference dies here → Resource NOT destroyed
+
+
+takeUnique(move(u2));   // u2 gives up ownership
+                        // function owns it now
+                        // Resource destroyed when function ends
+
+peekUnique(u2);         // u2 keeps ownership
+                        // function just borrows it
+                        // Resource NOT destroyed
+
+                
+5) shared_ptr — Shared Ownership
+
+Core Idea:
+shared_ptr = "Multiple people can own this resource"
+→ Keeps a COUNT of how many owners exist
+→ When count reaches 0 → resource destroyed
+→ This count is called REFERENCE COUNT
+
+How Reference Count Works:
+
+shared_ptr<Resource> s1 = make_shared<Resource>("Alpha");
+// count = 1
+
+shared_ptr<Resource> s2 = s1;    // copy → count increases
+// count = 2
+
+shared_ptr<Resource> s3 = s1;    // copy → count increases
+// count = 3
+
+s3 goes out of scope → count decreases
+// count = 2
+
+s2 goes out of scope → count decreases
+// count = 1
+
+s1 goes out of scope → count decreases
+// count = 0 → Resource DESTROYED
+
+Visual:
+s1 ──┐
+     ├──▶ [Resource "Alpha"] ◀── [ref count: 3]
+s2 ──┤
+     │
+s3 ──┘
+
+s3 dies:
+s1 ──┐
+     ├──▶ [Resource "Alpha"] ◀── [ref count: 2]
+s2 ──┘
+
+s2 dies:
+s1 ────▶ [Resource "Alpha"] ◀── [ref count: 1]
+
+s1 dies:
+[ref count: 0] → Resource DESTROYED ✅
+
+
+use_count() — Check Reference Count:
+
+shared_ptr<Resource> s1 = make_shared<Resource>("Alpha");
+cout << s1.use_count();    // 1
+
+shared_ptr<Resource> s2 = s1;
+cout << s1.use_count();    // 2
+
+shared_ptr<Resource> s3 = s1;
+cout << s1.use_count();    // 3
+
+
+6) weak_ptr — Non-Owning Observer
+
+Core Idea:
+weak_ptr = "I can SEE the resource but I don't OWN it"
+→ Does NOT increase reference count
+→ Cannot access resource directly
+→ Must LOCK it first to get a temporary shared_ptr
+→ Lock may fail if resource already destroyed
+
+
+shared_ptr<Resource> s1 = make_shared<Resource>("Alpha");
+// count = 1
+
+weak_ptr<Resource> w1 = s1;
+// count = STILL 1 ← weak_ptr does NOT increase count
+
+// To use the resource:
+shared_ptr<Resource> locked = w1.lock();
+// lock() returns shared_ptr if resource alive
+// lock() returns nullptr if resource destroyed
+
+if (locked) {
+    locked->use();    // safe to use
+    // count = 2 while locked exists
+}
+// locked goes out of scope → count back to 1
+
+7)  The Circular Reference Problem
+
+Why weak_ptr Exists:
+
+struct Node {
+    shared_ptr<Node> next;    // ← problem here
+    ~Node() { cout << "Node destroyed\n"; }
+};
+
+shared_ptr<Node> a = make_shared<Node>();
+shared_ptr<Node> b = make_shared<Node>();
+
+a->next = b;    // a holds b
+b->next = a;    // b holds a ← CIRCULAR!
+
+a ──▶ [Node A, count=2] ──next──▶ [Node B, count=2]
+                ▲                          │
+                └──────────next────────────┘
+
+a goes out of scope → count of A = 1 (b->next still holds it)
+b goes out of scope → count of B = 1 (a->next still holds it)
+
+count never reaches 0 → NEITHER destroyed → MEMORY LEAK 💸
+
+Fix With weak_ptr:
+struct Node {
+    weak_ptr<Node> next;    // ✅ weak_ptr breaks the cycle
+    ~Node() { cout << "Node destroyed\n"; }
+};
+
+a ──▶ [Node A, count=1] ──next(weak)──▶ [Node B, count=1]
+
+a goes out of scope → count of A = 0 → A destroyed ✅
+b goes out of scope → count of B = 0 → B destroyed ✅
