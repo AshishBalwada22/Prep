@@ -55,3 +55,11 @@ public:
     FileGuard(const FileGuard&)            = delete;
     FileGuard& operator=(const FileGuard&) = delete;
 };
+
+
+Why `= delete` on Copy?
+FileGuard a("data.txt", "r");
+FileGuard b = a;          // ❌ now two objects own same FILE*
+// end of scope:
+// ~FileGuard() for b → fclose(f) ✅
+// ~FileGuard() for a → fclose(f) ❌ DOUBLE CLOSE — undefined behavior
