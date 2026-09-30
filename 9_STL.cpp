@@ -97,3 +97,26 @@ Fast key lookup             → unordered_map
 Middle operations           → list
 
 ----------------------------------------------------------------------------------------
+
+Vector Push_Back ->  O(1) amortized
+
+ What Does "Amortized" Mean?
+vector<int> v;
+v.push_back(10);    // O(1) — just append
+v.push_back(20);    // O(1) — just append
+v.push_back(30);    // O(1) — just append
+...
+v.push_back(1000);  // O(n) — capacity full, reallocate!
+                    //        copy all 999 elements
+Most operations: O(1) Occasionally: O(n) when reallocating
+
+
+Vector push_back is O(1) amortized. Most operations are O(1), but occasionally when capacity is exceeded, reallocation happens and all elements are copied — O(n). 
+However, reallocations are rare (exponential growth), so the amortized cost per operation is still O(1)
+
+-----------------------------------------------------------------------------------------
+
+std::list<int> l = {1, 2, 3, 4, 5};
+auto it = l.begin();
+std::advance(it, 3);        // Line A — move iterator 3 positions forward -> o(n)
+l.erase(it);                // Line B — erase at iterator -> o(1)
